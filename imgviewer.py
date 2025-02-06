@@ -102,7 +102,7 @@ class ImageViewer(QMainWindow):
         # Optionally, first crop the outer white border (if you already have a function for that).
         cropped_image = self.crop_white_border(orig_image)
         # Now remove the internal white gap.
-        processed_image = remove_internal_white_gap(cropped_image, threshold=240, white_ratio=0.98, min_gap_height=70)
+        processed_image = remove_internal_white_gap(cropped_image, threshold=240, white_ratio=0.98, min_gap_height=100)
         orig_pixmap = QPixmap.fromImage(processed_image)
 
         # Scale to fit the viewport.
