@@ -76,9 +76,10 @@ class ImageViewer(QMainWindow):
 
     def add_image(self, idx, append=True):
         """
-        加载指定索引的图片，并添加到布局中
+        加载指定索引的图片，并添加到布局中。
         :param idx: 图片在 self.image_files 中的索引
-        :param append: True 表示添加到布局底部，False 表示插入到布局顶部
+        :param append: True 表示添加到布局底部，
+                    False 表示插入到布局顶部（并相应调整滚动条以保持连续）。
         """
         # 避免重复加载同一图片
         if idx in [lbl.property("index") for lbl in self.loaded_images]:
@@ -103,49 +104,65 @@ class ImageViewer(QMainWindow):
         label.setProperty("index", idx)             # 记录图片的索引
         label.setProperty("pixmap_orig", orig_pixmap) # 保存原始图片，用于重缩放
 
+        scroll_bar = self.scroll_area.verticalScrollBar()
+
         if append:
+            # Check if we are at (or near) the bottom.
+            was_at_bottom = (scroll_bar.value() >= scroll_bar.maximum() - 50)
+            # Record the current scroll value if we are at bottom.
+            if was_at_bottom:
+                old_scroll_value = scroll_bar.value()
             self.layout.addWidget(label)
             self.loaded_images.append(label)
+            # Clean up extra images from the top.
+            removed_total = self.cleanup_images("top")
+            # If we were at the bottom, adjust the scroll bar value.
+            if was_at_bottom:
+                # Removal from the top shifts the content upward by removed_total.
+                # To keep the same visual content, subtract that value from the old scroll value.
+                scroll_bar.setValue(old_scroll_value - removed_total)
         else:
-            # 插入到顶部前记录当前滚动条位置
-            scroll_bar = self.scroll_area.verticalScrollBar()
+            # For inserting at the top (scrolling up), the existing logic adjusts the scroll bar.
+            # 记录当前滚动条位置
             old_value = scroll_bar.value()
             self.layout.insertWidget(0, label)
             self.loaded_images.insert(0, label)
-            
             # 调整滚动条位置以保持视觉连续
             new_height = label.sizeHint().height()
             scroll_bar.setValue(old_value + new_height)
-
-        # 根据添加的方向进行清理：
-        # 当append为True（滚动向下），从顶部移除；当append为False（滚动向上），从底部移除。
-        if append:
-            self.cleanup_images("top")
-        else:
+            # 清理多余图片（这里移除底部图片）
             self.cleanup_images("bottom")
+
+
 
 
     def cleanup_images(self, remove_direction):
         """
         清理超出范围的图片，确保最多保留 max_loaded_images 张。
-        :param remove_direction: 'top' 表示从列表顶部移除（滚动向下时），
-                                'bottom' 表示从列表底部移除（滚动向上时）。
+        当从顶部移除图片时，返回移除的总高度，以便调整滚动条。
+        :param remove_direction: 'top' 表示从列表顶部移除，
+                                'bottom' 表示从列表底部移除。
+        :return: total_removed_height (int)
         """
+        total_removed = 0
         while len(self.loaded_images) > self.max_loaded_images:
             if remove_direction == "top":
                 removed = self.loaded_images.pop(0)
             elif remove_direction == "bottom":
                 removed = self.loaded_images.pop(-1)
             else:
-                # Fallback: remove from top
                 removed = self.loaded_images.pop(0)
+            # Use sizeHint() as a good approximation of the widget’s height.
+            removed_height = removed.sizeHint().height()
+            total_removed += removed_height
             self.layout.removeWidget(removed)
             removed.deleteLater()
-        
         if self.loaded_images:
             self.current_index = self.loaded_images[0].property("index")
         else:
             self.current_index = 0
+        return total_removed
+
 
 
     def wheelEvent(self, event: QWheelEvent):
@@ -209,8 +226,9 @@ class ImageViewer(QMainWindow):
     def keyPressEvent(self, event):
         """
         重载键盘按键事件：
-        - 当按下 'g' 键时弹出对话框，输入想要跳转的页码。
-        - 当按下 'o' 键时弹出文件夹选择对话框，重新加载其他文件夹中的图片。
+        - 按下 'g' 键时弹出对话框，输入想要跳转的页码。
+        - 按下 'o' 键时弹出文件夹选择对话框，重新加载其他文件夹中的图片。
+        - 按下 'F' 键时切换全屏模式。
         """
         if event.key() == Qt.Key_G:
             page, ok = QInputDialog.getInt(
@@ -227,7 +245,16 @@ class ImageViewer(QMainWindow):
         elif event.key() == Qt.Key_O:
             self.reload_folder()
             return
+        elif event.key() == Qt.Key_F:
+            # Toggle fullscreen mode
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+            return
+
         super().keyPressEvent(event)
+
 
     def jump_to_page(self, page):
         """
