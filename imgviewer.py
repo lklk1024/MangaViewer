@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QFileDialog,
     QMessageBox,
-    QInputDialog,  # 新增：用于弹出输入对话框
+    QInputDialog,
 )
 
 
@@ -110,41 +110,49 @@ class ImageViewer(QMainWindow):
             # 插入到顶部前记录当前滚动条位置
             scroll_bar = self.scroll_area.verticalScrollBar()
             old_value = scroll_bar.value()
-            old_max = scroll_bar.maximum()
-            
             self.layout.insertWidget(0, label)
             self.loaded_images.insert(0, label)
             
             # 调整滚动条位置以保持视觉连续
             new_height = label.sizeHint().height()
-            if old_max > 0:
-                scroll_bar.setValue(old_value + new_height)
+            scroll_bar.setValue(old_value + new_height)
 
-            self.cleanup_images()
+        # 根据添加的方向进行清理：
+        # 当append为True（滚动向下），从顶部移除；当append为False（滚动向上），从底部移除。
+        if append:
+            self.cleanup_images("top")
+        else:
+            self.cleanup_images("bottom")
 
-    def cleanup_images(self):
-        """清理超出范围的图片，确保最多保留 max_loaded_images 张"""
+
+    def cleanup_images(self, remove_direction):
+        """
+        清理超出范围的图片，确保最多保留 max_loaded_images 张。
+        :param remove_direction: 'top' 表示从列表顶部移除（滚动向下时），
+                                'bottom' 表示从列表底部移除（滚动向上时）。
+        """
         while len(self.loaded_images) > self.max_loaded_images:
-            # 优先移除不可见的顶部或底部图片
-            top_idx = self.loaded_images[0].property("index")
-            bottom_idx = self.loaded_images[-1].property("index")
-            
-            if top_idx < self.current_index:
+            if remove_direction == "top":
                 removed = self.loaded_images.pop(0)
-            elif bottom_idx > self.current_index + self.max_loaded_images - 1:
-                removed = self.loaded_images.pop()
+            elif remove_direction == "bottom":
+                removed = self.loaded_images.pop(-1)
             else:
-                break
-                
+                # Fallback: remove from top
+                removed = self.loaded_images.pop(0)
             self.layout.removeWidget(removed)
             removed.deleteLater()
+        
+        if self.loaded_images:
+            self.current_index = self.loaded_images[0].property("index")
+        else:
+            self.current_index = 0
+
 
     def wheelEvent(self, event: QWheelEvent):
         """重载鼠标滚轮事件，延迟检查加载新图片"""
         super().wheelEvent(event)
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(0, self.check_load_images)
-        
 
     def check_load_images(self):
         """
@@ -163,10 +171,8 @@ class ImageViewer(QMainWindow):
                 next_idx = self.loaded_images[-1].property("index") + 1
                 if next_idx < len(self.image_files):
                     self.add_image(next_idx, append=True)
-                    self.current_index = self.loaded_images[0].property("index")
             elif self.image_files:
                 self.add_image(0, append=True)
-                self.current_index = 0
 
         # 检查顶部
         elif value <= 50:
@@ -174,11 +180,9 @@ class ImageViewer(QMainWindow):
                 prev_idx = self.loaded_images[0].property("index") - 1
                 if prev_idx >= 0:
                     self.add_image(prev_idx, append=False)
-                    self.current_index = self.loaded_images[0].property("index")
             elif self.image_files:
                 last_idx = len(self.image_files) - 1
                 self.add_image(last_idx, append=False)
-                self.current_index = last_idx
 
     def resizeEvent(self, event):
         """
@@ -202,36 +206,35 @@ class ImageViewer(QMainWindow):
             label.resize(scaled_pixmap.size())
         super().resizeEvent(event)
 
-    # ================= 新功能：指定页面跳转 =================
     def keyPressEvent(self, event):
         """
         重载键盘按键事件：
-        当按下 'g' 键时弹出对话框，输入想要跳转的页码。
-        页码以 1 开始计数，如果输入合法则跳转，否则弹出提示。
+        - 当按下 'g' 键时弹出对话框，输入想要跳转的页码。
+        - 当按下 'o' 键时弹出文件夹选择对话框，重新加载其他文件夹中的图片。
         """
         if event.key() == Qt.Key_G:
-            # 弹出输入对话框，输入页码（页码范围为 1 到图片总数）
             page, ok = QInputDialog.getInt(
                 self,
                 "跳转页面",
                 "请输入跳转页码（1-{}）：".format(len(self.image_files)),
-                value=self.current_index + 1,  # 默认显示当前页码（注意：current_index 为 0 起始）
+                value=self.current_index + 1,
                 min=1,
                 max=len(self.image_files),
             )
             if ok:
-                # 页码输入有效则执行跳转
                 self.jump_to_page(page)
-            return  # 阻止事件继续传递
+            return
+        elif event.key() == Qt.Key_O:
+            self.reload_folder()
+            return
         super().keyPressEvent(event)
 
     def jump_to_page(self, page):
         """
         执行页面跳转：
         清空当前加载的图片列表，并从指定页码处重新加载图片。
-        参数 page 为 1 基数，需要转换为 0 基数的索引。
         """
-        target_index = page - 1  # 转换为 0 基数索引
+        target_index = page - 1
         if target_index < 0 or target_index >= len(self.image_files):
             QMessageBox.warning(self, "跳转失败", "输入的页码无效！")
             return
@@ -246,9 +249,29 @@ class ImageViewer(QMainWindow):
         self.current_index = target_index
         self.preload_images()
 
-        # 将滚动条置顶，确保跳转页面显示在视野中
+        # 将滚动条置顶
         self.scroll_area.verticalScrollBar().setValue(0)
-    # =========================================================
+
+    def reload_folder(self):
+        """重新加载文件夹"""
+        folder = QFileDialog.getExistingDirectory(self, "选择新的图片文件夹", os.getcwd())
+        if not folder:
+            return
+
+        self.folder = folder
+
+        # 清空当前已加载的图片
+        for label in self.loaded_images:
+            self.layout.removeWidget(label)
+            label.deleteLater()
+        self.loaded_images.clear()
+
+        # 重新加载图片列表和预加载图片
+        self.load_image_list()
+        self.current_index = 0
+        self.preload_images()
+        self.scroll_area.verticalScrollBar().setValue(0)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
