@@ -247,34 +247,28 @@ class ImageViewer(QMainWindow):
         QTimer.singleShot(0, self.check_load_images)
 
     def check_load_images(self):
-        """
-        检查滚动条的位置：
-        - 如果接近底部，则加载下一张图片（追加到底部）；
-        - 如果接近顶部，则加载上一张图片（插入到布局顶部）。
-        每次只加载一张，避免循环卡死
-        """
+        """检查滚动条的位置，根据视口高度动态调整触发阈值"""
         scroll_bar = self.scroll_area.verticalScrollBar()
         value = scroll_bar.value()
         maximum = scroll_bar.maximum()
+        viewport_height = self.scroll_area.viewport().height()
 
-        # 检查底部
-        if value >= maximum - 50 and maximum > 0:
+        # 动态计算触发阈值（视口高度的1/3）
+        threshold = max(50, viewport_height // 3)  # 至少保留50px的触发区域
+
+        # 检查底部（当距离底部小于阈值时加载）
+        if maximum > 0 and value >= maximum - threshold:
             if self.loaded_images:
                 next_idx = self.loaded_images[-1].property("index") + 1
                 if next_idx < len(self.image_files):
                     self.add_image(next_idx, append=True)
-            elif self.image_files:
-                self.add_image(0, append=True)
 
-        # 检查顶部
-        elif value <= 50:
+        # 检查顶部（当距离顶部小于阈值时加载）
+        elif value <= threshold:
             if self.loaded_images:
                 prev_idx = self.loaded_images[0].property("index") - 1
                 if prev_idx >= 0:
                     self.add_image(prev_idx, append=False)
-            elif self.image_files:
-                last_idx = len(self.image_files) - 1
-                self.add_image(last_idx, append=False)
 
     def resizeEvent(self, event):
         """
